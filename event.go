@@ -222,6 +222,8 @@ func (eventState *eventMonitoringState) monitorEvents(c *Client) {
 	for eventState.isEnabled() {
 		timeout := time.After(100 * time.Millisecond)
 		select {
+		// Because this channel reader needs to aquire state mutex,
+		// no channel writer should block on a channel write while holding the mutex.
 		case ev, ok := <-eventState.C:
 			if !ok {
 				return
@@ -347,7 +349,9 @@ func (c *Client) eventHijack(startTime int64, eventChan chan *APIEvents, errChan
 					c.eventMonitor.RLock()
 					if c.eventMonitor.enabled && c.eventMonitor.C == eventChan {
 						// Signal that we're exiting.
-						eventChan <- EOFEvent
+						go func() {
+							eventChan <- EOFEvent
+						}()
 					}
 					c.eventMonitor.RUnlock()
 					break
@@ -360,7 +364,9 @@ func (c *Client) eventHijack(startTime int64, eventChan chan *APIEvents, errChan
 			transformEvent(&event)
 			c.eventMonitor.RLock()
 			if c.eventMonitor.enabled && c.eventMonitor.C == eventChan {
-				eventChan <- &event
+				go func(e APIEvents) {
+					eventChan <- &e
+				}(event)
 			}
 			c.eventMonitor.RUnlock()
 		}
